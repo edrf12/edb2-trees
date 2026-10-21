@@ -1,0 +1,16 @@
+[package]
+name = "edb2-avl_rbtree"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.29"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+proptest = "1"
+
+[[bench]]
+name = "tree"
+harness = false

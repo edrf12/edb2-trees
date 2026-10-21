@@ -20,9 +20,14 @@ pub struct TreeSnapshot<K, V> {
     pub root: Option<Box<NodeSnapshot<K, V>>>,
 }
 
+pub struct TraceStep<K, V> {
+    pub description: String,
+    pub snapshot: TreeSnapshot<K, V>,
+}
+
 pub struct Trace<K, V> {
     pub initial: TreeSnapshot<K, V>,
-    pub steps: Vec<String>,
+    pub steps: Vec<TraceStep<K, V>>,
     pub final_state: TreeSnapshot<K, V>,
 }
 
@@ -39,8 +44,11 @@ impl<K, V> Trace<K, V> {
         }
     }
 
-    pub fn record(&mut self, description: impl Into<String>) {
-        self.steps.push(description.into());
+    pub fn record(&mut self, description: impl Into<String>, snapshot: TreeSnapshot<K, V>) {
+        self.steps.push(TraceStep {
+            description: description.into(),
+            snapshot,
+        });
     }
 }
 

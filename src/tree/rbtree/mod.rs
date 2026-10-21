@@ -115,10 +115,13 @@ impl<K: Ord, V> RBTree<K, V> {
         V: Clone,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Insert key");
+        trace.record("Insert key", self.snapshot());
         self.insert(key, value);
-        trace.record("Red-black links rebalanced and colors updated");
         trace.final_state = self.snapshot();
+        trace.record(
+            "Red-black rotation/recoloring complete",
+            trace.final_state.clone(),
+        );
         trace
     }
 
@@ -128,10 +131,13 @@ impl<K: Ord, V> RBTree<K, V> {
         V: Clone,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Remove key");
+        trace.record("Remove key", self.snapshot());
         let value = self.remove(key);
-        trace.record("Red-black links rebalanced and colors updated");
         trace.final_state = self.snapshot();
+        trace.record(
+            "Red-black rotation/recoloring complete",
+            trace.final_state.clone(),
+        );
         (value, trace)
     }
 

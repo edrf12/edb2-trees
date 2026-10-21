@@ -110,10 +110,10 @@ impl<K: Ord, V> AvlTree<K, V> {
         V: Clone,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Insert key");
+        trace.record("Insert key", self.snapshot());
         self.insert(key, value);
-        trace.record("AVL rebalanced and heights updated");
         trace.final_state = self.snapshot();
+        trace.record("AVL rotation/rebalance complete", trace.final_state.clone());
         trace
     }
 
@@ -123,10 +123,10 @@ impl<K: Ord, V> AvlTree<K, V> {
         V: Clone,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Remove key");
+        trace.record("Remove key", self.snapshot());
         let value = self.remove(key);
-        trace.record("AVL rebalanced and heights updated");
         trace.final_state = self.snapshot();
+        trace.record("AVL rotation/rebalance complete", trace.final_state.clone());
         (value, trace)
     }
 
