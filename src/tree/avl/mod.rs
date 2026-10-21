@@ -203,6 +203,30 @@ impl<K: Ord, V> AvlTree<K, V> {
         K: Clone + PartialEq,
         V: Clone + PartialEq,
     {
+        trace.record(label, Self::snapshot_with_path(node, path));
+    }
+
+    fn record_traced_rotation(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        label: &str,
+        pivot: K,
+        trace: &mut Trace<K, V>,
+    ) where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        trace.record_highlighted(label, Self::snapshot_with_path(node, path), pivot);
+    }
+
+    fn snapshot_with_path(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+    ) -> TreeSnapshot<K, V>
+    where
+        K: Clone,
+        V: Clone,
+    {
         let mut root = Self::snapshot_node(Some(node));
         for (ancestor, descended_left) in path.iter().rev() {
             let mut ancestor = ancestor.clone();
@@ -219,7 +243,7 @@ impl<K: Ord, V> AvlTree<K, V> {
             };
             root = Some(Box::new(ancestor));
         }
-        trace.record(label, TreeSnapshot { root });
+        TreeSnapshot { root }
     }
 
     fn rebalance_traced(
@@ -239,11 +263,25 @@ impl<K: Ord, V> AvlTree<K, V> {
                     node.left = Some(Self::rotate_left(
                         node.left.take().expect("LR rotation needs a left child"),
                     ));
-                    Self::record_traced_subtree(&node, path, "LR rotation: left child", trace);
+                    let pivot = node.left.as_ref().unwrap().key.clone();
+                    Self::record_traced_rotation(
+                        &node,
+                        path,
+                        "LR rotation: left child",
+                        pivot,
+                        trace,
+                    );
                 }
                 let case = if left_balance < 0 { "LR" } else { "LL" };
                 let node = Self::rotate_right(node);
-                Self::record_traced_subtree(&node, path, &format!("{case} rotation: right"), trace);
+                let pivot = node.key.clone();
+                Self::record_traced_rotation(
+                    &node,
+                    path,
+                    &format!("{case} rotation: right"),
+                    pivot,
+                    trace,
+                );
                 node
             }
             balance if balance < -1 => {
@@ -252,11 +290,25 @@ impl<K: Ord, V> AvlTree<K, V> {
                     node.right = Some(Self::rotate_right(
                         node.right.take().expect("RL rotation needs a right child"),
                     ));
-                    Self::record_traced_subtree(&node, path, "RL rotation: right child", trace);
+                    let pivot = node.right.as_ref().unwrap().key.clone();
+                    Self::record_traced_rotation(
+                        &node,
+                        path,
+                        "RL rotation: right child",
+                        pivot,
+                        trace,
+                    );
                 }
                 let case = if right_balance > 0 { "RL" } else { "RR" };
                 let node = Self::rotate_left(node);
-                Self::record_traced_subtree(&node, path, &format!("{case} rotation: left"), trace);
+                let pivot = node.key.clone();
+                Self::record_traced_rotation(
+                    &node,
+                    path,
+                    &format!("{case} rotation: left"),
+                    pivot,
+                    trace,
+                );
                 node
             }
             _ => node,

@@ -228,6 +228,30 @@ impl<K: Ord, V> RBTree<K, V> {
         K: Clone + PartialEq,
         V: Clone + PartialEq,
     {
+        trace.record(label, Self::snapshot_with_path(node, path));
+    }
+
+    fn record_traced_rotation(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        label: &str,
+        pivot: K,
+        trace: &mut Trace<K, V>,
+    ) where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        trace.record_highlighted(label, Self::snapshot_with_path(node, path), pivot);
+    }
+
+    fn snapshot_with_path(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+    ) -> TreeSnapshot<K, V>
+    where
+        K: Clone,
+        V: Clone,
+    {
         let mut root = Self::snapshot_node(Some(node));
         for (ancestor, descended_left) in path.iter().rev() {
             let mut ancestor = ancestor.clone();
@@ -238,7 +262,7 @@ impl<K: Ord, V> RBTree<K, V> {
             }
             root = Some(Box::new(ancestor));
         }
-        trace.record(label, TreeSnapshot { root });
+        TreeSnapshot { root }
     }
 
     fn remove_traced(
@@ -270,7 +294,8 @@ impl<K: Ord, V> RBTree<K, V> {
         } else {
             if Self::is_red(&node.left) {
                 node = Self::rotate_right(node);
-                Self::record_traced_subtree(&node, path, "Rotate right", trace);
+                let pivot = node.key.clone();
+                Self::record_traced_rotation(&node, path, "Rotate right", pivot, trace);
             }
             if key == &node.key && node.right.is_none() {
                 Self::record_traced_subtree(&node, path, "Remove leaf", trace);
@@ -352,9 +377,11 @@ impl<K: Ord, V> RBTree<K, V> {
         if Self::right_child_is_red(&node.right) {
             let right = node.right.take().expect("right child exists");
             node.right = Some(Self::rotate_right(right));
-            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            let pivot = node.right.as_ref().unwrap().key.clone();
+            Self::record_traced_rotation(&node, path, "Rotate right", pivot, trace);
             node = Self::rotate_left(node);
-            Self::record_traced_subtree(&node, path, "Rotate left", trace);
+            let pivot = node.key.clone();
+            Self::record_traced_rotation(&node, path, "Rotate left", pivot, trace);
             Self::flip_colors(&mut node);
             Self::record_traced_subtree(&node, path, "Color flip after rotation", trace);
         }
@@ -374,7 +401,8 @@ impl<K: Ord, V> RBTree<K, V> {
         Self::record_traced_subtree(&node, path, "Color flip moving red right", trace);
         if Self::left_child_is_red(&node.left) {
             node = Self::rotate_right(node);
-            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            let pivot = node.key.clone();
+            Self::record_traced_rotation(&node, path, "Rotate right", pivot, trace);
             Self::flip_colors(&mut node);
             Self::record_traced_subtree(&node, path, "Color flip after rotation", trace);
         }
@@ -392,7 +420,8 @@ impl<K: Ord, V> RBTree<K, V> {
     {
         if Self::is_red(&node.right) && !Self::is_red(&node.left) {
             node = Self::rotate_left(node);
-            Self::record_traced_subtree(&node, path, "Rotate left", trace);
+            let pivot = node.key.clone();
+            Self::record_traced_rotation(&node, path, "Rotate left", pivot, trace);
         }
 
         let left_has_red_left = node
@@ -401,7 +430,8 @@ impl<K: Ord, V> RBTree<K, V> {
             .is_some_and(|left| Self::is_red(&left.left));
         if Self::is_red(&node.left) && left_has_red_left {
             node = Self::rotate_right(node);
-            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            let pivot = node.key.clone();
+            Self::record_traced_rotation(&node, path, "Rotate right", pivot, trace);
         }
 
         if Self::is_red(&node.left) && Self::is_red(&node.right) {

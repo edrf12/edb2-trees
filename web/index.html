@@ -42,13 +42,19 @@
     .stage { min-width: 0; min-height: 480px; position: relative; overflow: auto; background-color: var(--canvas); background-image: radial-gradient(#283b47 0.7px, transparent 0.7px); background-size: 22px 22px; }
     #tree { display: block; width: 100%; min-width: 640px; height: 100%; min-height: 480px; }
     .edge { stroke: #718591; stroke-width: 2; fill: none; }
+    .edge { transition: opacity .32s ease; }
     .node circle { stroke: #dce8ed; stroke-width: 2; }
+    .node { transform-box: view-box; transform-origin: 0 0; transition: transform .42s cubic-bezier(.2,.75,.25,1), opacity .3s ease; }
     .node text { text-anchor: middle; dominant-baseline: middle; font-size: 15px; font-weight: 650; fill: #f3f7f8; }
     .node .meta { text-anchor: start; font-size: 12px; font-weight: 500; fill: var(--muted); }
     .node.red circle { fill: var(--red); stroke: #ffd4ce; }
     .node.black circle { fill: var(--black-node); stroke: #9aabb5; }
     .node.active circle { stroke: var(--mint); stroke-width: 4; }
+    .node.pivot circle { stroke: #ffd166; stroke-width: 4; filter: drop-shadow(0 0 7px #ffd16688); }
     .empty { fill: var(--muted); font-size: 15px; text-anchor: middle; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
     footer { display: flex; align-items: center; gap: .65rem; min-height: 62px; padding: .7rem 1rem; border-top: 1px solid var(--rule); background: #121e28; }
     footer button { min-width: 40px; }
     #step-label { min-width: 140px; color: var(--muted); font-size: .82rem; }
@@ -96,7 +102,10 @@
   </div>
   <script type="module">
     import init, { BrowserTree } from './pkg/edb2_avl_rbtree.js';
-    let tree, kind = 'avl', frames = [], frameIndex = 0, timer = null;
+    let tree, kind = 'avl', frames = [], frameIndex = 0, timer = null, autoplay = false;
+    let nodeLayer, edgeLayer;
+    const nodeElements = new Map(), edgeElements = new Map();
+    const svgNamespace = 'http://www.w3.org/2000/svg';
     const svg = document.querySelector('#tree');
     const status = document.querySelector('#status');
     const kindInput = document.querySelector('#kind');
@@ -106,11 +115,48 @@
     function operate(operation, key) {
       const result = decodeResult(tree[operation](key));
       frames = result.frames;
-      // Keep an active playback timer. It now advances through the newly
-      // recorded operation instead of being restarted or toggled off.
       frameIndex = 0;
+      if (autoplay) startPlayback();
       status.textContent = result.result;
       renderFrame();
+    }
+    function svgElement(name, attributes = {}) {
+      const element = document.createElementNS(svgNamespace, name);
+      for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+      return element;
+    }
+    function ensureLayers() {
+      if (nodeLayer?.isConnected && edgeLayer?.isConnected) return;
+      svg.replaceChildren();
+      const defs = svgElement('defs');
+      const marker = svgElement('marker', { id: 'arrow', markerWidth: 8, markerHeight: 8, refX: 6, refY: 3, orient: 'auto' });
+      marker.append(svgElement('path', { d: 'M0,0 L0,6 L6,3 z', fill: '#718591' }));
+      defs.append(marker);
+      edgeLayer = svgElement('g', { class: 'edges' });
+      nodeLayer = svgElement('g', { class: 'nodes' });
+      svg.append(defs, edgeLayer, nodeLayer);
+    }
+    function makeNodeElement() {
+      const group = svgElement('g', { class: 'node', opacity: 0 });
+      group.append(svgElement('circle', { cx: 0, cy: 0, r: 24 }));
+      const key = svgElement('text', { x: 0, y: 0 });
+      const metaOne = svgElement('text', { class: 'meta', x: 31, y: -5 });
+      const metaTwo = svgElement('text', { class: 'meta', x: 31, y: 13 });
+      group.append(key, metaOne, metaTwo);
+      return group;
+    }
+    function setNodePosition(element, x, y) {
+      element.style.transform = `translate(${x}px, ${y}px)`;
+    }
+    function updateEdge(path, d) {
+      const oldPath = path.getAttribute('d');
+      path.setAttribute('d', d);
+      if (oldPath && oldPath !== d && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        path.querySelector('animate')?.remove();
+        const animation = svgElement('animate', { attributeName: 'd', from: oldPath, to: d, dur: '.38s', fill: 'freeze' });
+        path.append(animation);
+        animation.beginElement?.();
+      }
     }
     function renderFrame() {
       const current = frames[frameIndex] ?? { label: 'Ready', snapshot: snapshot(), affected_key: null };
@@ -120,22 +166,50 @@
       const width = Math.max(svg.clientWidth, 640), row = 112, top = 64;
       const heightPx = Math.max(420, top + (Math.max(1, ...nodes.map(n => n.depth + 1))) * row + 45);
       svg.setAttribute('viewBox', `0 0 ${width} ${heightPx}`); svg.setAttribute('height', heightPx);
-      if (!nodes.length) { svg.innerHTML = `<text class="empty" x="${width/2}" y="${heightPx/2}">An empty tree. Insert a key to begin.</text>`; }
+      if (!nodes.length) {
+        svg.replaceChildren(); nodeLayer = edgeLayer = null; nodeElements.clear(); edgeElements.clear();
+        svg.append(svgElement('text', { class: 'empty', x: width / 2, y: heightPx / 2 }));
+        svg.lastChild.textContent = 'An empty tree. Insert a key to begin.';
+      }
       else {
+        ensureLayers();
         const positions = new Map();
         nodes.forEach((entry, index) => positions.set(entry.node, { x: width * (index + 1) / (nodes.length + 1), y: top + entry.depth * row }));
-        const edges = [];
+        const visibleEdges = new Set();
         for (const { node } of nodes) for (const child of [node.left, node.right]) if (child) {
+          const edgeKey = `${node.key}:${child.key}`;
+          visibleEdges.add(edgeKey);
           const from = positions.get(node), to = positions.get(child);
-          edges.push(`<path class="edge" d="M ${from.x} ${from.y + 24} C ${from.x} ${from.y + 62}, ${to.x} ${to.y - 62}, ${to.x} ${to.y - 24}" marker-end="url(#arrow)"/>`);
+          let path = edgeElements.get(edgeKey);
+          if (!path) {
+            path = svgElement('path', { class: 'edge', opacity: 0, 'marker-end': 'url(#arrow)' });
+            edgeElements.set(edgeKey, path); edgeLayer.append(path);
+          }
+          updateEdge(path, `M ${from.x} ${from.y + 24} C ${from.x} ${from.y + 62}, ${to.x} ${to.y - 62}, ${to.x} ${to.y - 24}`);
+          requestAnimationFrame(() => path.setAttribute('opacity', '1'));
         }
-        const circles = nodes.map(({node}) => {
+        for (const [edgeKey, path] of edgeElements) if (!visibleEdges.has(edgeKey)) {
+          edgeElements.delete(edgeKey); path.setAttribute('opacity', '0'); setTimeout(() => path.remove(), 350);
+        }
+        const visibleNodes = new Set();
+        for (const {node} of nodes) {
+          const nodeKey = String(node.key); visibleNodes.add(nodeKey);
           const {x,y} = positions.get(node);
           const metadata = kind === 'avl' ? [`h=${node.metadata.height}`, `bf=${node.metadata.balance}`] : ['color', node.metadata.color];
-          const highlighted = current.affected_key === node.key ? ' active' : '';
-          return `<g class="node ${kind === 'rb' ? node.metadata.color : ''}${highlighted}"><circle cx="${x}" cy="${y}" r="24"/><text x="${x}" y="${y}">${node.key}</text><text class="meta" x="${x+31}" y="${y-5}">${metadata[0]}</text><text class="meta" x="${x+31}" y="${y+13}">${metadata[1]}</text></g>`;
-        });
-        svg.innerHTML = `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#718591"/></marker></defs>${edges.join('')}${circles.join('')}`;
+          let element = nodeElements.get(nodeKey);
+          if (!element) {
+            element = makeNodeElement(); nodeElements.set(nodeKey, element); nodeLayer.append(element);
+            requestAnimationFrame(() => element.setAttribute('opacity', '1'));
+          }
+          element.setAttribute('class', `node ${kind === 'rb' ? node.metadata.color : ''}${current.affected_key === node.key ? ' pivot' : ''}`);
+          setNodePosition(element, x, y);
+          element.children[1].textContent = String(node.key);
+          element.children[2].textContent = metadata[0];
+          element.children[3].textContent = metadata[1];
+        }
+        for (const [nodeKey, element] of nodeElements) if (!visibleNodes.has(nodeKey)) {
+          nodeElements.delete(nodeKey); element.setAttribute('opacity', '0'); setTimeout(() => element.remove(), 350);
+        }
       }
       timeline.max = String(Math.max(0, frames.length - 1)); timeline.value = String(frameIndex);
       document.querySelector('#step-label').textContent = `Step ${frameIndex + 1} of ${frames.length}`;
@@ -154,18 +228,22 @@
     document.querySelector('#previous').onclick = () => { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); };
     document.querySelector('#next').onclick = () => { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); };
     const playButton = document.querySelector('#play');
-    function stopPlayback() { clearInterval(timer); timer = null; playButton.textContent = '▶'; playButton.setAttribute('aria-label', 'Play frames'); }
-    document.querySelector('#play').onclick = () => {
-      if (timer) { stopPlayback(); return; }
+    function startPlayback() {
+      if (timer) return;
       playButton.textContent = 'Ⅱ'; playButton.setAttribute('aria-label', 'Pause frames');
       timer = setInterval(() => {
-        if (frameIndex >= frames.length - 1) { stopPlayback(); return; }
-        frameIndex++;
-        renderFrame();
+        if (frameIndex >= frames.length - 1) { clearInterval(timer); timer = null; return; }
+        frameIndex++; renderFrame();
       }, 700);
+    }
+    function pausePlayback() { autoplay = false; clearInterval(timer); timer = null; playButton.textContent = '▶'; playButton.setAttribute('aria-label', 'Play frames'); }
+    document.querySelector('#play').onclick = () => {
+      if (autoplay) { pausePlayback(); return; }
+      if (frameIndex >= frames.length - 1) { frameIndex = 0; renderFrame(); }
+      autoplay = true; startPlayback();
     };
-    timeline.oninput = () => { frameIndex = Number(timeline.value); renderFrame(); };
-    window.addEventListener('keydown', event => { if (event.target.matches('input,select,button')) return; if (event.key === 'ArrowLeft') { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); } if (event.key === 'ArrowRight') { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); } });
+    timeline.oninput = () => { frameIndex = Number(timeline.value); renderFrame(); if (autoplay) startPlayback(); };
+    window.addEventListener('keydown', event => { if (event.target.matches('input,select,button')) return; if (event.key === 'ArrowLeft') { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); if (autoplay) startPlayback(); } if (event.key === 'ArrowRight') { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); if (autoplay) startPlayback(); } });
     window.addEventListener('resize', renderFrame);
     await init();
     tree = new BrowserTree(kind);

@@ -26,6 +26,7 @@ pub struct TreeSnapshot<K, V> {
 pub struct TraceStep<K, V> {
     pub description: String,
     pub snapshot: TreeSnapshot<K, V>,
+    pub highlighted_key: Option<K>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -53,6 +54,30 @@ impl<K, V> Trace<K, V> {
         K: PartialEq,
         V: PartialEq,
     {
+        self.push_if_changed(description, snapshot, None);
+    }
+
+    pub fn record_highlighted(
+        &mut self,
+        description: impl Into<String>,
+        snapshot: TreeSnapshot<K, V>,
+        highlighted_key: K,
+    ) where
+        K: PartialEq,
+        V: PartialEq,
+    {
+        self.push_if_changed(description, snapshot, Some(highlighted_key));
+    }
+
+    fn push_if_changed(
+        &mut self,
+        description: impl Into<String>,
+        snapshot: TreeSnapshot<K, V>,
+        highlighted_key: Option<K>,
+    ) where
+        K: PartialEq,
+        V: PartialEq,
+    {
         let previous = self
             .steps
             .last()
@@ -63,6 +88,7 @@ impl<K, V> Trace<K, V> {
         self.steps.push(TraceStep {
             description: description.into(),
             snapshot,
+            highlighted_key,
         });
     }
 }

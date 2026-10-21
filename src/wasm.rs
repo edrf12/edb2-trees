@@ -64,11 +64,11 @@ impl BrowserTree {
         let frames = match &mut self.tree {
             Tree::Avl(tree) => {
                 let trace = tree.insert_with_trace(key, ());
-                trace_frames(trace.initial, trace.steps, trace.final_state, key)
+                trace_frames(trace.initial, trace.steps, trace.final_state)
             }
             Tree::RedBlack(tree) => {
                 let trace = tree.insert_with_trace(key, ());
-                trace_frames(trace.initial, trace.steps, trace.final_state, key)
+                trace_frames(trace.initial, trace.steps, trace.final_state)
             }
         };
         encode(&OperationResult {
@@ -83,14 +83,14 @@ impl BrowserTree {
                 let (value, trace) = tree.remove_with_trace(&key);
                 (
                     value.is_some(),
-                    trace_frames(trace.initial, trace.steps, trace.final_state, key),
+                    trace_frames(trace.initial, trace.steps, trace.final_state),
                 )
             }
             Tree::RedBlack(tree) => {
                 let (value, trace) = tree.remove_with_trace(&key);
                 (
                     value.is_some(),
-                    trace_frames(trace.initial, trace.steps, trace.final_state, key),
+                    trace_frames(trace.initial, trace.steps, trace.final_state),
                 )
             }
         };
@@ -143,17 +143,16 @@ fn trace_frames(
     initial: TreeSnapshot<i32, ()>,
     steps: Vec<TraceStep<i32, ()>>,
     final_state: TreeSnapshot<i32, ()>,
-    key: i32,
 ) -> Vec<Frame> {
     let mut frames = vec![Frame {
         label: "Before operation".into(),
         snapshot: initial,
-        affected_key: Some(key),
+        affected_key: None,
     }];
     frames.extend(steps.into_iter().map(|step| Frame {
         label: step.description,
         snapshot: step.snapshot,
-        affected_key: Some(key),
+        affected_key: step.highlighted_key,
     }));
     if frames
         .last()
@@ -162,7 +161,7 @@ fn trace_frames(
         frames.push(Frame {
             label: "After operation".into(),
             snapshot: final_state,
-            affected_key: Some(key),
+            affected_key: None,
         });
     }
     frames
