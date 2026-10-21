@@ -106,6 +106,8 @@
     function operate(operation, key) {
       const result = decodeResult(tree[operation](key));
       frames = result.frames;
+      // Keep an active playback timer. It now advances through the newly
+      // recorded operation instead of being restarted or toggled off.
       frameIndex = 0;
       status.textContent = result.result;
       renderFrame();
@@ -140,16 +142,27 @@
       document.querySelector('#event').textContent = current.label;
     }
     function readKey() { const value = Number(document.querySelector('#key').value); if (!Number.isInteger(value)) { status.textContent = 'Enter a whole-number key.'; return null; } return value; }
-    document.querySelector('#insert').onclick = () => { const key = readKey(); if (key !== null) operate('insert', key); };
-    document.querySelector('#delete').onclick = () => { const key = readKey(); if (key !== null) operate('delete', key); };
-    document.querySelector('#search').onclick = () => { const key = readKey(); if (key !== null) operate('search', key); };
+    function runFromKey(operation) { const key = readKey(); if (key !== null) operate(operation, key); }
+    document.querySelector('#insert').onclick = () => runFromKey('insert');
+    document.querySelector('#delete').onclick = () => runFromKey('delete');
+    document.querySelector('#search').onclick = () => runFromKey('search');
+    document.querySelector('#key').addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); runFromKey('insert'); }
+    });
     document.querySelector('#reset').onclick = () => { const empty = JSON.parse(tree.reset()); frames = [{label:'Tree reset', snapshot:empty, affected_key:null}]; frameIndex = 0; status.textContent = 'Tree reset.'; renderFrame(); };
     kindInput.onchange = () => { kind = kindInput.value; const empty = JSON.parse(tree.switch_tree(kind)); frames = [{label:`New ${kind === 'avl' ? 'AVL' : 'red-black'} tree`, snapshot:empty, affected_key:null}]; frameIndex = 0; status.textContent = 'Tree type changed; started a new empty tree.'; renderFrame(); };
     document.querySelector('#previous').onclick = () => { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); };
     document.querySelector('#next').onclick = () => { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); };
-    document.querySelector('#play').onclick = event => {
-      if (timer) { clearInterval(timer); timer = null; event.currentTarget.textContent = '▶'; return; }
-      event.currentTarget.textContent = 'Ⅱ'; timer = setInterval(() => { if (frameIndex >= frames.length - 1) { clearInterval(timer); timer = null; event.currentTarget.textContent = '▶'; return; } frameIndex++; renderFrame(); }, 700);
+    const playButton = document.querySelector('#play');
+    function stopPlayback() { clearInterval(timer); timer = null; playButton.textContent = '▶'; playButton.setAttribute('aria-label', 'Play frames'); }
+    document.querySelector('#play').onclick = () => {
+      if (timer) { stopPlayback(); return; }
+      playButton.textContent = 'Ⅱ'; playButton.setAttribute('aria-label', 'Pause frames');
+      timer = setInterval(() => {
+        if (frameIndex >= frames.length - 1) { stopPlayback(); return; }
+        frameIndex++;
+        renderFrame();
+      }, 700);
     };
     timeline.oninput = () => { frameIndex = Number(timeline.value); renderFrame(); };
     window.addEventListener('keydown', event => { if (event.target.matches('input,select,button')) return; if (event.key === 'ArrowLeft') { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); } if (event.key === 'ArrowRight') { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); } });

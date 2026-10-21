@@ -111,33 +111,46 @@ impl<K: Ord, V> RBTree<K, V> {
 
     pub fn insert_with_trace(&mut self, key: K, value: V) -> Trace<K, V>
     where
-        K: Clone,
-        V: Clone,
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Insert key", self.snapshot());
-        self.insert(key, value);
+        self.root = Self::insert_traced(self.root.take(), key, value, &mut Vec::new(), &mut trace);
+        if let Some(root) = &mut self.root
+            && root.color == Color::Red
+        {
+            root.color = Color::Black;
+            Self::record_traced_subtree(root, &[], "Recolor root black", &mut trace);
+        }
         trace.final_state = self.snapshot();
-        trace.record(
-            "Red-black rotation/recoloring complete",
-            trace.final_state.clone(),
-        );
+        trace.record("Insertion complete", trace.final_state.clone());
         trace
     }
 
     pub fn remove_with_trace(&mut self, key: &K) -> (Option<V>, Trace<K, V>)
     where
-        K: Clone,
-        V: Clone,
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Remove key", self.snapshot());
-        let value = self.remove(key);
+        if self.search(key).is_none() {
+            return (None, trace);
+        }
+        let mut root = self.root.take().expect("the key was found in the tree");
+        if !Self::is_red(&root.left) && !Self::is_red(&root.right) {
+            root.color = Color::Red;
+            Self::record_traced_subtree(&root, &[], "Color root red for deletion", &mut trace);
+        }
+        let (root, value) = Self::remove_traced(root, key, &mut Vec::new(), &mut trace);
+        self.root = root;
+        if let Some(root) = &mut self.root
+            && root.color == Color::Red
+        {
+            root.color = Color::Black;
+            Self::record_traced_subtree(root, &[], "Recolor root black", &mut trace);
+        }
         trace.final_state = self.snapshot();
-        trace.record(
-            "Red-black rotation/recoloring complete",
-            trace.final_state.clone(),
-        );
+        trace.record("Removal complete", trace.final_state.clone());
         (value, trace)
     }
 
@@ -158,6 +171,247 @@ impl<K: Ord, V> RBTree<K, V> {
                 Some(Self::rebalance(node))
             }
         }
+    }
+
+    fn insert_traced(
+        node: Link<K, V>,
+        key: K,
+        value: V,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> Link<K, V>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        match node {
+            None => {
+                let node = Box::new(Node::new(key, value));
+                Self::record_traced_subtree(&node, path, "Insert red leaf", trace);
+                Some(node)
+            }
+            Some(mut node) => {
+                match key.cmp(&node.key) {
+                    Ordering::Less => {
+                        path.push((
+                            Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                            true,
+                        ));
+                        node.left = Self::insert_traced(node.left.take(), key, value, path, trace);
+                        path.pop();
+                    }
+                    Ordering::Greater => {
+                        path.push((
+                            Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                            false,
+                        ));
+                        node.right =
+                            Self::insert_traced(node.right.take(), key, value, path, trace);
+                        path.pop();
+                    }
+                    Ordering::Equal => {
+                        node.value = value;
+                        return Some(node);
+                    }
+                }
+                Some(Self::rebalance_traced(node, path, trace))
+            }
+        }
+    }
+
+    fn record_traced_subtree(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        label: &str,
+        trace: &mut Trace<K, V>,
+    ) where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        let mut root = Self::snapshot_node(Some(node));
+        for (ancestor, descended_left) in path.iter().rev() {
+            let mut ancestor = ancestor.clone();
+            if *descended_left {
+                ancestor.left = root;
+            } else {
+                ancestor.right = root;
+            }
+            root = Some(Box::new(ancestor));
+        }
+        trace.record(label, TreeSnapshot { root });
+    }
+
+    fn remove_traced(
+        mut node: Box<Node<K, V>>,
+        key: &K,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> (Link<K, V>, Option<V>)
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        let removed;
+        if key < &node.key {
+            if !Self::is_red(&node.left) && !Self::left_child_is_red(&node.left) {
+                node = Self::move_red_left_traced(node, path, trace);
+            }
+            let Some(left) = node.left.take() else {
+                return (Some(node), None);
+            };
+            path.push((
+                Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                true,
+            ));
+            let (left, value) = Self::remove_traced(left, key, path, trace);
+            path.pop();
+            node.left = left;
+            removed = value;
+        } else {
+            if Self::is_red(&node.left) {
+                node = Self::rotate_right(node);
+                Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            }
+            if key == &node.key && node.right.is_none() {
+                Self::record_traced_subtree(&node, path, "Remove leaf", trace);
+                return (None, Some(node.value));
+            }
+            if !Self::is_red(&node.right) && !Self::right_child_is_red(&node.right) {
+                node = Self::move_red_right_traced(node, path, trace);
+            }
+            if key == &node.key {
+                let right = node
+                    .right
+                    .take()
+                    .expect("a node with two children has a successor");
+                path.push((
+                    Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                    false,
+                ));
+                let (right, successor) = Self::delete_min_traced(right, path, trace);
+                path.pop();
+                node.right = right;
+                node.key = successor.key;
+                removed = Some(std::mem::replace(&mut node.value, successor.value));
+                Self::record_traced_subtree(&node, path, "Replace with successor", trace);
+            } else {
+                let Some(right) = node.right.take() else {
+                    return (Some(node), None);
+                };
+                path.push((
+                    Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                    false,
+                ));
+                let (right, value) = Self::remove_traced(right, key, path, trace);
+                path.pop();
+                node.right = right;
+                removed = value;
+            }
+        }
+        (Some(Self::rebalance_traced(node, path, trace)), removed)
+    }
+
+    fn delete_min_traced(
+        mut node: Box<Node<K, V>>,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> (Link<K, V>, Box<Node<K, V>>)
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        if node.left.is_none() {
+            Self::record_traced_subtree(&node, path, "Remove successor leaf", trace);
+            return (None, node);
+        }
+        if !Self::is_red(&node.left) && !Self::left_child_is_red(&node.left) {
+            node = Self::move_red_left_traced(node, path, trace);
+        }
+        let left = node.left.take().expect("minimum is in left subtree");
+        path.push((
+            Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+            true,
+        ));
+        let (left, min) = Self::delete_min_traced(left, path, trace);
+        path.pop();
+        node.left = left;
+        (Some(Self::rebalance_traced(node, path, trace)), min)
+    }
+
+    fn move_red_left_traced(
+        mut node: Box<Node<K, V>>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        trace: &mut Trace<K, V>,
+    ) -> Box<Node<K, V>>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        Self::flip_colors(&mut node);
+        Self::record_traced_subtree(&node, path, "Color flip moving red left", trace);
+        if Self::right_child_is_red(&node.right) {
+            let right = node.right.take().expect("right child exists");
+            node.right = Some(Self::rotate_right(right));
+            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            node = Self::rotate_left(node);
+            Self::record_traced_subtree(&node, path, "Rotate left", trace);
+            Self::flip_colors(&mut node);
+            Self::record_traced_subtree(&node, path, "Color flip after rotation", trace);
+        }
+        node
+    }
+
+    fn move_red_right_traced(
+        mut node: Box<Node<K, V>>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        trace: &mut Trace<K, V>,
+    ) -> Box<Node<K, V>>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        Self::flip_colors(&mut node);
+        Self::record_traced_subtree(&node, path, "Color flip moving red right", trace);
+        if Self::left_child_is_red(&node.left) {
+            node = Self::rotate_right(node);
+            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+            Self::flip_colors(&mut node);
+            Self::record_traced_subtree(&node, path, "Color flip after rotation", trace);
+        }
+        node
+    }
+
+    fn rebalance_traced(
+        mut node: Box<Node<K, V>>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        trace: &mut Trace<K, V>,
+    ) -> Box<Node<K, V>>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        if Self::is_red(&node.right) && !Self::is_red(&node.left) {
+            node = Self::rotate_left(node);
+            Self::record_traced_subtree(&node, path, "Rotate left", trace);
+        }
+
+        let left_has_red_left = node
+            .left
+            .as_ref()
+            .is_some_and(|left| Self::is_red(&left.left));
+        if Self::is_red(&node.left) && left_has_red_left {
+            node = Self::rotate_right(node);
+            Self::record_traced_subtree(&node, path, "Rotate right", trace);
+        }
+
+        if Self::is_red(&node.left) && Self::is_red(&node.right) {
+            node.color = Color::Red;
+            node.left.as_mut().expect("red left child exists").color = Color::Black;
+            node.right.as_mut().expect("red right child exists").color = Color::Black;
+            Self::record_traced_subtree(&node, path, "Color flip", trace);
+        }
+
+        node
     }
 
     // Top-down LLRB deletion: move a red link toward the subtree before descending.

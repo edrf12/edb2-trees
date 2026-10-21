@@ -1,14 +1,14 @@
 use serde::Serialize;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeMetadata {
     Avl { height: i32, balance: i32 },
     RedBlack { color: &'static str },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NodeSnapshot<K, V> {
     pub key: K,
     pub value: V,
@@ -17,7 +17,7 @@ pub struct NodeSnapshot<K, V> {
     pub right: Option<Box<NodeSnapshot<K, V>>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TreeSnapshot<K, V> {
     pub root: Option<Box<NodeSnapshot<K, V>>>,
 }
@@ -48,7 +48,18 @@ impl<K, V> Trace<K, V> {
         }
     }
 
-    pub fn record(&mut self, description: impl Into<String>, snapshot: TreeSnapshot<K, V>) {
+    pub fn record(&mut self, description: impl Into<String>, snapshot: TreeSnapshot<K, V>)
+    where
+        K: PartialEq,
+        V: PartialEq,
+    {
+        let previous = self
+            .steps
+            .last()
+            .map_or(&self.initial, |step| &step.snapshot);
+        if previous == &snapshot {
+            return;
+        }
         self.steps.push(TraceStep {
             description: description.into(),
             snapshot,

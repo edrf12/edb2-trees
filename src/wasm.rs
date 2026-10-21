@@ -5,7 +5,7 @@ use crate::tree::{
     avl::AvlTree,
     ordered::OrderedTree,
     rbtree::RBTree,
-    trace::{NodeSnapshot, TreeSnapshot},
+    trace::{NodeSnapshot, TraceStep, TreeSnapshot},
 };
 
 enum Tree {
@@ -139,56 +139,33 @@ fn encode(value: &impl Serialize) -> Result<String, JsValue> {
     serde_json::to_string(value).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
-fn trace_frames<K, V>(
-    initial: TreeSnapshot<K, V>,
-    steps: Vec<crate::tree::trace::TraceStep<K, V>>,
-    final_state: TreeSnapshot<K, V>,
+fn trace_frames(
+    initial: TreeSnapshot<i32, ()>,
+    steps: Vec<TraceStep<i32, ()>>,
+    final_state: TreeSnapshot<i32, ()>,
     key: i32,
-) -> Vec<Frame>
-where
-    K: Into<i32> + Copy,
-    V: Copy,
-{
-    // The browser-facing tree uses i32 keys and unit values. This helper is
-    // intentionally specialized by the callers' concrete tree instantiations.
+) -> Vec<Frame> {
     let mut frames = vec![Frame {
         label: "Before operation".into(),
-        snapshot: erase_values(initial),
+        snapshot: initial,
         affected_key: Some(key),
     }];
     frames.extend(steps.into_iter().map(|step| Frame {
         label: step.description,
-        snapshot: erase_values(step.snapshot),
+        snapshot: step.snapshot,
         affected_key: Some(key),
     }));
-    frames.push(Frame {
-        label: "After operation".into(),
-        snapshot: erase_values(final_state),
-        affected_key: Some(key),
-    });
+    if frames
+        .last()
+        .is_none_or(|frame| frame.snapshot != final_state)
+    {
+        frames.push(Frame {
+            label: "After operation".into(),
+            snapshot: final_state,
+            affected_key: Some(key),
+        });
+    }
     frames
-}
-
-fn erase_values<K, V>(snapshot: TreeSnapshot<K, V>) -> TreeSnapshot<i32, ()>
-where
-    K: Into<i32>,
-{
-    fn erase<K: Into<i32>, V>(
-        node: Option<Box<NodeSnapshot<K, V>>>,
-    ) -> Option<Box<NodeSnapshot<i32, ()>>> {
-        node.map(|node| {
-            Box::new(NodeSnapshot {
-                key: node.key.into(),
-                value: (),
-                metadata: node.metadata,
-                left: erase(node.left),
-                right: erase(node.right),
-            })
-        })
-    }
-    TreeSnapshot {
-        root: erase(snapshot.root),
-    }
 }
 
 fn search_path(

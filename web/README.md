@@ -4,6 +4,12 @@ This is a static web app. The AVL and red-black tree operations run in the Rust
 WASM module; the page uses plain HTML, CSS, and JavaScript to display the
 resulting snapshots and operation frames.
 
+Choose AVL or red-black and insert, delete, or search integer keys. Press Enter
+in the key field to insert. Use the timeline or arrow buttons to review the
+frames; Play continues advancing if an operation is started during playback.
+Rotation and recoloring frames contain the changed tree snapshots, and repeated
+unchanged snapshots are omitted.
+
 ## Local development
 
 Install `wasm-pack`, add the `wasm32-unknown-unknown` Rust target, then run from

@@ -106,33 +106,26 @@ impl<K: Ord, V> AvlTree<K, V> {
 
     pub fn insert_with_trace(&mut self, key: K, value: V) -> Trace<K, V>
     where
-        K: Clone,
-        V: Clone,
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Insert key", self.snapshot());
-        self.insert(key, value);
+        self.root = Self::insert_traced(self.root.take(), key, value, &mut Vec::new(), &mut trace);
         trace.final_state = self.snapshot();
-        trace.record(
-            "AVL rotation case: LL / RR / LR / RL",
-            trace.final_state.clone(),
-        );
+        trace.record("Insertion complete", trace.final_state.clone());
         trace
     }
 
     pub fn remove_with_trace(&mut self, key: &K) -> (Option<V>, Trace<K, V>)
     where
-        K: Clone,
-        V: Clone,
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
     {
         let mut trace = Trace::new(self.snapshot());
-        trace.record("Remove key", self.snapshot());
-        let value = self.remove(key);
+        let (root, value) = Self::remove_traced(self.root.take(), key, &mut Vec::new(), &mut trace);
+        self.root = root;
         trace.final_state = self.snapshot();
-        trace.record(
-            "AVL rotation case: LL / RR / LR / RL",
-            trace.final_state.clone(),
-        );
+        trace.record("Tree changed after removal", trace.final_state.clone());
         (value, trace)
     }
 
@@ -151,6 +144,220 @@ impl<K: Ord, V> AvlTree<K, V> {
                 }
 
                 Some(Self::rebalance(node))
+            }
+        }
+    }
+
+    fn insert_traced(
+        node: Link<K, V>,
+        key: K,
+        value: V,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> Link<K, V>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        match node {
+            None => {
+                let node = Box::new(Node::new(key, value));
+                Self::record_traced_subtree(&node, path, "Insert leaf", trace);
+                Some(node)
+            }
+            Some(mut node) => {
+                match key.cmp(&node.key) {
+                    Ordering::Less => {
+                        path.push((
+                            Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                            true,
+                        ));
+                        node.left = Self::insert_traced(node.left.take(), key, value, path, trace);
+                        path.pop();
+                    }
+                    Ordering::Greater => {
+                        path.push((
+                            Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                            false,
+                        ));
+                        node.right =
+                            Self::insert_traced(node.right.take(), key, value, path, trace);
+                        path.pop();
+                    }
+                    Ordering::Equal => {
+                        node.value = value;
+                        return Some(node);
+                    }
+                }
+                Some(Self::rebalance_traced(node, path, trace))
+            }
+        }
+    }
+
+    fn record_traced_subtree(
+        node: &Node<K, V>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        label: &str,
+        trace: &mut Trace<K, V>,
+    ) where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        let mut root = Self::snapshot_node(Some(node));
+        for (ancestor, descended_left) in path.iter().rev() {
+            let mut ancestor = ancestor.clone();
+            if *descended_left {
+                ancestor.left = root;
+            } else {
+                ancestor.right = root;
+            }
+            let left_height = snapshot_height(&ancestor.left);
+            let right_height = snapshot_height(&ancestor.right);
+            ancestor.metadata = NodeMetadata::Avl {
+                height: 1 + left_height.max(right_height),
+                balance: left_height - right_height,
+            };
+            root = Some(Box::new(ancestor));
+        }
+        trace.record(label, TreeSnapshot { root });
+    }
+
+    fn rebalance_traced(
+        mut node: Box<Node<K, V>>,
+        path: &[(NodeSnapshot<K, V>, bool)],
+        trace: &mut Trace<K, V>,
+    ) -> Box<Node<K, V>>
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        node.update_height();
+        match node.get_balance() {
+            balance if balance > 1 => {
+                let left_balance = node.left.as_ref().map_or(0, |child| child.get_balance());
+                if left_balance < 0 {
+                    node.left = Some(Self::rotate_left(
+                        node.left.take().expect("LR rotation needs a left child"),
+                    ));
+                    Self::record_traced_subtree(&node, path, "LR rotation: left child", trace);
+                }
+                let case = if left_balance < 0 { "LR" } else { "LL" };
+                let node = Self::rotate_right(node);
+                Self::record_traced_subtree(&node, path, &format!("{case} rotation: right"), trace);
+                node
+            }
+            balance if balance < -1 => {
+                let right_balance = node.right.as_ref().map_or(0, |child| child.get_balance());
+                if right_balance > 0 {
+                    node.right = Some(Self::rotate_right(
+                        node.right.take().expect("RL rotation needs a right child"),
+                    ));
+                    Self::record_traced_subtree(&node, path, "RL rotation: right child", trace);
+                }
+                let case = if right_balance > 0 { "RL" } else { "RR" };
+                let node = Self::rotate_left(node);
+                Self::record_traced_subtree(&node, path, &format!("{case} rotation: left"), trace);
+                node
+            }
+            _ => node,
+        }
+    }
+
+    fn remove_traced(
+        node: Link<K, V>,
+        key: &K,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> (Link<K, V>, Option<V>)
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        let Some(mut node) = node else {
+            return (None, None);
+        };
+        match key.cmp(&node.key) {
+            Ordering::Equal => {
+                let removed = node.value.clone();
+                let removed_snapshot = Self::snapshot_node(Some(&node)).unwrap().as_ref().clone();
+                match (node.left, node.right) {
+                    (Some(left), Some(right)) => {
+                        path.push((removed_snapshot, false));
+                        let (right, mut successor) = Self::remove_min_traced(right, path, trace);
+                        path.pop();
+                        successor.left = Some(left);
+                        successor.right = right;
+                        let successor = Self::rebalance_traced(successor, path, trace);
+                        Self::record_traced_subtree(
+                            &successor,
+                            path,
+                            "Replace removed node",
+                            trace,
+                        );
+                        (Some(successor), Some(removed))
+                    }
+                    (Some(child), None) | (None, Some(child)) => {
+                        Self::record_traced_subtree(&child, path, "Remove node", trace);
+                        (Some(child), Some(removed))
+                    }
+                    (None, None) => (None, Some(removed)),
+                }
+            }
+            direction => {
+                let went_left = direction == Ordering::Less;
+                let ancestor = Self::snapshot_node(Some(&node)).unwrap().as_ref().clone();
+                let removed = if went_left {
+                    path.push((ancestor, true));
+                    let result = Self::remove_traced(node.left.take(), key, path, trace);
+                    path.pop();
+                    node.left = result.0;
+                    result.1
+                } else {
+                    path.push((ancestor, false));
+                    let result = Self::remove_traced(node.right.take(), key, path, trace);
+                    path.pop();
+                    node.right = result.0;
+                    result.1
+                };
+                if removed.is_some() {
+                    let node = Self::rebalance_traced(node, path, trace);
+                    Self::record_traced_subtree(&node, path, "Rebalance after removal", trace);
+                    (Some(node), removed)
+                } else {
+                    (Some(node), None)
+                }
+            }
+        }
+    }
+
+    fn remove_min_traced(
+        mut node: Box<Node<K, V>>,
+        path: &mut Vec<(NodeSnapshot<K, V>, bool)>,
+        trace: &mut Trace<K, V>,
+    ) -> (Link<K, V>, Box<Node<K, V>>)
+    where
+        K: Clone + PartialEq,
+        V: Clone + PartialEq,
+    {
+        match node.left.take() {
+            None => {
+                let remainder = node.right.take();
+                if let Some(remainder_node) = remainder.as_deref() {
+                    Self::record_traced_subtree(remainder_node, path, "Remove successor", trace);
+                }
+                (remainder, node)
+            }
+            Some(left) => {
+                path.push((
+                    Self::snapshot_node(Some(&node)).unwrap().as_ref().clone(),
+                    true,
+                ));
+                let (left, min) = Self::remove_min_traced(left, path, trace);
+                path.pop();
+                node.left = left;
+                let node = Self::rebalance_traced(node, path, trace);
+                Self::record_traced_subtree(&node, path, "Rebalance successor path", trace);
+                (Some(node), min)
             }
         }
     }
@@ -257,6 +464,13 @@ impl<K: Ord, V> AvlTree<K, V> {
 
         pivot
     }
+}
+
+fn snapshot_height<K, V>(node: &Option<Box<NodeSnapshot<K, V>>>) -> i32 {
+    node.as_ref().map_or(0, |node| match node.metadata {
+        NodeMetadata::Avl { height, .. } => height,
+        NodeMetadata::RedBlack { .. } => 0,
+    })
 }
 
 #[cfg(test)]
