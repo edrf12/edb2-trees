@@ -101,7 +101,7 @@ impl App {
             "reset" => self.reset(),
             "h" | "help" => {
                 self.status =
-                    "i/d/s <args>  a=AVL  r=red-black  ←/→ step  space autoplay  x reset  q quit"
+                    "i/d/s <args>  a=AVL  r=red-black  ←/→ step  Tab autoplay  x reset  q quit"
                         .into()
             }
             _ => self.status = "Unknown command; press h for help".into(),
@@ -256,13 +256,14 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<(
                 (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
                 (KeyCode::Enter, _) => app.execute(),
-                (KeyCode::Char(' '), _) => app.autoplay = !app.autoplay,
+                (KeyCode::Tab, _) => app.autoplay = !app.autoplay,
                 (KeyCode::Left, _) => app.previous(),
                 (KeyCode::Right, _) => app.next(),
                 (KeyCode::Backspace, _) => {
                     app.input.pop();
                 }
                 (KeyCode::Char('x'), _) => app.reset(),
+                (KeyCode::Char(' '), _) => app.input.push(' '),
                 (KeyCode::Char(ch), _) => app.input.push(ch),
                 _ => {}
             }
