@@ -1,5 +1,7 @@
 # Tree Study
 
+[Leia em português (Brasil)](README.pt-BR.md).
+
 This is a static web app. The AVL and red-black tree operations run in the Rust
 WASM module; the page uses plain HTML, CSS, and JavaScript to display the
 resulting snapshots and operation frames.
