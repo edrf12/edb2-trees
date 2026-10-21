@@ -54,40 +54,92 @@ impl<K, V> Trace<K, V> {
 
 impl<K: Display, V: Display> TreeSnapshot<K, V> {
     pub fn render(&self) -> String {
-        let mut lines = Vec::new();
-        render_node(&self.root, "", true, &mut lines);
-        if lines.is_empty() {
+        let mut levels = Vec::new();
+        collect_levels(&self.root, 0, 0, &mut levels);
+        if levels.is_empty() {
             "(empty)".to_string()
         } else {
+            let label_width = levels
+                .iter()
+                .flatten()
+                .filter_map(|label| label.as_ref().map(String::len))
+                .max()
+                .unwrap_or(3)
+                + 2;
+            let mut lines = Vec::new();
+            for depth in 0..levels.len() {
+                let slots = 1usize << depth;
+                let gap = label_width + 2;
+                let mut line = vec![' '; (slots * gap).max(label_width)];
+                for (slot, label) in levels[depth].iter().enumerate() {
+                    let Some(label) = label else { continue };
+                    let center = slot * gap + gap / 2;
+                    let start = center.saturating_sub(label.len() / 2);
+                    for (offset, character) in label.chars().enumerate() {
+                        if start + offset >= line.len() {
+                            line.resize(start + offset + 1, ' ');
+                        }
+                        line[start + offset] = character;
+                    }
+                }
+                lines.push(line.into_iter().collect::<String>().trim_end().to_string());
+                if depth + 1 < levels.len() {
+                    let child_gap = gap;
+                    let mut arrows =
+                        vec![' '; ((1usize << (depth + 1)) * child_gap).max(label_width)];
+                    for (slot, parent) in levels[depth].iter().enumerate() {
+                        if parent.is_none() {
+                            continue;
+                        }
+                        let parent_center = slot * gap + gap / 2;
+                        let left = parent_center.saturating_sub(child_gap / 2);
+                        let right = parent_center + child_gap / 2;
+                        if slot * 2 < levels[depth + 1].len()
+                            && levels[depth + 1][slot * 2].is_some()
+                            && left < arrows.len()
+                        {
+                            arrows[left] = '/';
+                        }
+                        if slot * 2 + 1 < levels[depth + 1].len()
+                            && levels[depth + 1][slot * 2 + 1].is_some()
+                            && right < arrows.len()
+                        {
+                            arrows[right] = '\\';
+                        }
+                    }
+                    lines.push(
+                        arrows
+                            .into_iter()
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string(),
+                    );
+                }
+            }
             lines.join("\n")
         }
     }
 }
 
-fn render_node<K: Display, V: Display>(
+fn collect_levels<K: Display, V: Display>(
     node: &Option<Box<NodeSnapshot<K, V>>>,
-    prefix: &str,
-    is_tail: bool,
-    lines: &mut Vec<String>,
+    depth: usize,
+    slot: usize,
+    levels: &mut Vec<Vec<Option<String>>>,
 ) {
     let Some(node) = node else { return };
-    render_node(&node.right, &format!("{prefix}    "), false, lines);
-    let connector = if prefix.is_empty() {
-        ""
-    } else if is_tail {
-        "`-- "
-    } else {
-        "+-- "
-    };
     let metadata = match node.metadata {
         NodeMetadata::Avl { height, balance } => format!("h={height}, bf={balance}"),
         NodeMetadata::RedBlack { color } => color.to_string(),
     };
-    lines.push(format!(
-        "{prefix}{connector}{}:{} [{metadata}]",
-        node.key, node.value
-    ));
-    render_node(&node.left, &format!("{prefix}    "), true, lines);
+    while levels.len() <= depth {
+        levels.push(Vec::new());
+    }
+    let required = (1usize << depth).max(slot + 1);
+    levels[depth].resize(required, None);
+    levels[depth][slot] = Some(format!("[{} {metadata}]", node.key));
+    collect_levels(&node.left, depth + 1, slot * 2, levels);
+    collect_levels(&node.right, depth + 1, slot * 2 + 1, levels);
 }
 
 impl<K: Display, V: Display> Display for TreeSnapshot<K, V> {

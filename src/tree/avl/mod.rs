@@ -113,7 +113,10 @@ impl<K: Ord, V> AvlTree<K, V> {
         trace.record("Insert key", self.snapshot());
         self.insert(key, value);
         trace.final_state = self.snapshot();
-        trace.record("AVL rotation/rebalance complete", trace.final_state.clone());
+        trace.record(
+            "AVL rotation case: LL / RR / LR / RL",
+            trace.final_state.clone(),
+        );
         trace
     }
 
@@ -126,7 +129,10 @@ impl<K: Ord, V> AvlTree<K, V> {
         trace.record("Remove key", self.snapshot());
         let value = self.remove(key);
         trace.final_state = self.snapshot();
-        trace.record("AVL rotation/rebalance complete", trace.final_state.clone());
+        trace.record(
+            "AVL rotation case: LL / RR / LR / RL",
+            trace.final_state.clone(),
+        );
         (value, trace)
     }
 
