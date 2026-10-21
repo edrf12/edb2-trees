@@ -237,13 +237,29 @@
       }, 700);
     }
     function pausePlayback() { autoplay = false; clearInterval(timer); timer = null; playButton.textContent = '▶'; playButton.setAttribute('aria-label', 'Play frames'); }
-    document.querySelector('#play').onclick = () => {
+    function togglePlayback() {
       if (autoplay) { pausePlayback(); return; }
       if (frameIndex >= frames.length - 1) { frameIndex = 0; renderFrame(); }
       autoplay = true; startPlayback();
-    };
+    }
+    playButton.onclick = togglePlayback;
     timeline.oninput = () => { frameIndex = Number(timeline.value); renderFrame(); if (autoplay) startPlayback(); };
-    window.addEventListener('keydown', event => { if (event.target.matches('input,select,button')) return; if (event.key === 'ArrowLeft') { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); if (autoplay) startPlayback(); } if (event.key === 'ArrowRight') { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); if (autoplay) startPlayback(); } });
+    window.addEventListener('keydown', event => {
+      if (event.code === 'Space') {
+        event.preventDefault();
+        togglePlayback();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        frameIndex = Math.max(0, frameIndex - 1);
+        renderFrame();
+        if (autoplay) startPlayback();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        frameIndex = Math.min(frames.length - 1, frameIndex + 1);
+        renderFrame();
+        if (autoplay) startPlayback();
+      }
+    });
     window.addEventListener('resize', renderFrame);
     await init();
     tree = new BrowserTree(kind);
