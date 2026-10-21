@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tree Study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #e7edf2;
+      --muted: #92a2af;
+      --canvas: #101b25;
+      --panel: #172531;
+      --rule: #31434f;
+      --mint: #7bd6b2;
+      --red: #ed776f;
+      --black-node: #263b49;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: var(--ink); background: #0c151d; }
+    button, input, select { color: inherit; font: inherit; }
+    button, input, select { border: 1px solid var(--rule); border-radius: 5px; background: #101b25; }
+    button { padding: .62rem .8rem; cursor: pointer; }
+    button:hover { border-color: var(--mint); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+    header { display: flex; align-items: baseline; justify-content: space-between; padding: 1rem 1.5rem; border-bottom: 1px solid var(--rule); }
+    h1 { margin: 0; font-size: 1.15rem; font-weight: 620; letter-spacing: -.02em; }
+    header p { margin: 0; color: var(--muted); font-size: .86rem; }
+    main { min-height: 0; display: grid; grid-template-columns: 245px minmax(0, 1fr); }
+    aside { padding: 1.2rem; border-right: 1px solid var(--rule); background: #121e28; }
+    .field { display: grid; gap: .4rem; margin-bottom: 1rem; }
+    label, .section-label { color: var(--muted); font-size: .78rem; }
+    input, select { width: 100%; padding: .65rem .7rem; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .actions button:first-child { color: #081710; border-color: var(--mint); background: var(--mint); }
+    .actions .wide { grid-column: 1 / -1; }
+    .note { min-height: 2.8rem; margin: 1rem 0; color: var(--muted); font-size: .85rem; line-height: 1.45; }
+    .legend { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .78rem; line-height: 1.7; }
+    .legend strong { color: var(--ink); font-weight: 550; }
+    .stage { min-width: 0; min-height: 480px; position: relative; overflow: auto; background-color: var(--canvas); background-image: radial-gradient(#283b47 0.7px, transparent 0.7px); background-size: 22px 22px; }
+    #tree { display: block; width: 100%; min-width: 640px; height: 100%; min-height: 480px; }
+    .edge { stroke: #718591; stroke-width: 2; fill: none; }
+    .node circle { stroke: #dce8ed; stroke-width: 2; }
+    .node text { text-anchor: middle; dominant-baseline: middle; font-size: 15px; font-weight: 650; fill: #f3f7f8; }
+    .node .meta { text-anchor: start; font-size: 12px; font-weight: 500; fill: var(--muted); }
+    .node.red circle { fill: var(--red); stroke: #ffd4ce; }
+    .node.black circle { fill: var(--black-node); stroke: #9aabb5; }
+    .node.active circle { stroke: var(--mint); stroke-width: 4; }
+    .empty { fill: var(--muted); font-size: 15px; text-anchor: middle; }
+    footer { display: flex; align-items: center; gap: .65rem; min-height: 62px; padding: .7rem 1rem; border-top: 1px solid var(--rule); background: #121e28; }
+    footer button { min-width: 40px; }
+    #step-label { min-width: 140px; color: var(--muted); font-size: .82rem; }
+    #timeline { flex: 1; accent-color: var(--mint); }
+    #event { width: min(32vw, 380px); overflow: hidden; color: var(--ink); font-size: .84rem; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 760px) {
+      header { align-items: flex-start; flex-direction: column; gap: .35rem; }
+      main { grid-template-columns: 1fr; grid-template-rows: auto minmax(420px, 1fr); }
+      aside { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem .8rem; padding: .8rem; border-right: 0; border-bottom: 1px solid var(--rule); }
+      .field { margin: 0; }
+      .actions { align-self: end; }
+      .note, .legend { display: none; }
+      footer { flex-wrap: wrap; }
+      #event { order: 5; width: 100%; }
+    }
+    @media (prefers-reduced-motion: no-preference) { button { transition: border-color .12s ease, background-color .12s ease; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header><h1>Tree Study</h1><p>Build a tree. Follow what changes.</p></header>
+    <main>
+      <aside>
+        <div class="field"><label for="kind">Tree</label><select id="kind"><option value="avl">AVL</option><option value="rb">Red-black</option></select></div>
+        <div class="field"><label for="key">Key</label><input id="key" type="number" step="1" placeholder="e.g. 42"></div>
+        <div class="actions">
+          <button id="insert">Insert</button><button id="delete">Delete</button>
+          <button id="search">Search</button><button id="reset">Reset</button>
+        </div>
+        <p class="note" id="status" aria-live="polite">Enter a key to begin.</p>
+        <div class="legend"><strong>AVL</strong> shows height and balance.<br><strong>Red-black</strong> nodes use red and slate colors.<br><br>Use the timeline or arrow keys to review frames.</div>
+      </aside>
+      <section class="stage" aria-label="Tree visualization">
+        <svg id="tree" role="img" aria-label="Current tree"></svg>
+      </section>
+    </main>
+    <footer>
+      <button id="previous" aria-label="Previous frame">←</button>
+      <button id="play" aria-label="Play frames">▶</button>
+      <button id="next" aria-label="Next frame">→</button>
+      <span id="step-label">Step 1 of 1</span>
+      <input id="timeline" type="range" min="0" max="0" value="0" aria-label="Transition frame">
+      <span id="event">Ready</span>
+    </footer>
+  </div>
+  <script type="module">
+    import init, { BrowserTree } from './pkg/edb2_avl_rbtree.js';
+    let tree, kind = 'avl', frames = [], frameIndex = 0, timer = null;
+    const svg = document.querySelector('#tree');
+    const status = document.querySelector('#status');
+    const kindInput = document.querySelector('#kind');
+    const timeline = document.querySelector('#timeline');
+    function decodeResult(json) { return JSON.parse(json); }
+    function snapshot() { return JSON.parse(tree.snapshot_json()).root; }
+    function operate(operation, key) {
+      const result = decodeResult(tree[operation](key));
+      frames = result.frames;
+      frameIndex = 0;
+      status.textContent = result.result;
+      renderFrame();
+    }
+    function renderFrame() {
+      const current = frames[frameIndex] ?? { label: 'Ready', snapshot: snapshot(), affected_key: null };
+      const nodes = [];
+      function place(node, depth = 0) { if (!node) return; place(node.left, depth + 1); nodes.push({ node, depth, order: nodes.length }); place(node.right, depth + 1); }
+      place(current.snapshot.root);
+      const width = Math.max(svg.clientWidth, 640), row = 112, top = 64;
+      const heightPx = Math.max(420, top + (Math.max(1, ...nodes.map(n => n.depth + 1))) * row + 45);
+      svg.setAttribute('viewBox', `0 0 ${width} ${heightPx}`); svg.setAttribute('height', heightPx);
+      if (!nodes.length) { svg.innerHTML = `<text class="empty" x="${width/2}" y="${heightPx/2}">An empty tree. Insert a key to begin.</text>`; }
+      else {
+        const positions = new Map();
+        nodes.forEach((entry, index) => positions.set(entry.node, { x: width * (index + 1) / (nodes.length + 1), y: top + entry.depth * row }));
+        const edges = [];
+        for (const { node } of nodes) for (const child of [node.left, node.right]) if (child) {
+          const from = positions.get(node), to = positions.get(child);
+          edges.push(`<path class="edge" d="M ${from.x} ${from.y + 24} C ${from.x} ${from.y + 62}, ${to.x} ${to.y - 62}, ${to.x} ${to.y - 24}" marker-end="url(#arrow)"/>`);
+        }
+        const circles = nodes.map(({node}) => {
+          const {x,y} = positions.get(node);
+          const metadata = kind === 'avl' ? [`h=${node.metadata.height}`, `bf=${node.metadata.balance}`] : ['color', node.metadata.color];
+          const highlighted = current.affected_key === node.key ? ' active' : '';
+          return `<g class="node ${kind === 'rb' ? node.metadata.color : ''}${highlighted}"><circle cx="${x}" cy="${y}" r="24"/><text x="${x}" y="${y}">${node.key}</text><text class="meta" x="${x+31}" y="${y-5}">${metadata[0]}</text><text class="meta" x="${x+31}" y="${y+13}">${metadata[1]}</text></g>`;
+        });
+        svg.innerHTML = `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#718591"/></marker></defs>${edges.join('')}${circles.join('')}`;
+      }
+      timeline.max = String(Math.max(0, frames.length - 1)); timeline.value = String(frameIndex);
+      document.querySelector('#step-label').textContent = `Step ${frameIndex + 1} of ${frames.length}`;
+      document.querySelector('#event').textContent = current.label;
+    }
+    function readKey() { const value = Number(document.querySelector('#key').value); if (!Number.isInteger(value)) { status.textContent = 'Enter a whole-number key.'; return null; } return value; }
+    document.querySelector('#insert').onclick = () => { const key = readKey(); if (key !== null) operate('insert', key); };
+    document.querySelector('#delete').onclick = () => { const key = readKey(); if (key !== null) operate('delete', key); };
+    document.querySelector('#search').onclick = () => { const key = readKey(); if (key !== null) operate('search', key); };
+    document.querySelector('#reset').onclick = () => { const empty = JSON.parse(tree.reset()); frames = [{label:'Tree reset', snapshot:empty, affected_key:null}]; frameIndex = 0; status.textContent = 'Tree reset.'; renderFrame(); };
+    kindInput.onchange = () => { kind = kindInput.value; const empty = JSON.parse(tree.switch_tree(kind)); frames = [{label:`New ${kind === 'avl' ? 'AVL' : 'red-black'} tree`, snapshot:empty, affected_key:null}]; frameIndex = 0; status.textContent = 'Tree type changed; started a new empty tree.'; renderFrame(); };
+    document.querySelector('#previous').onclick = () => { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); };
+    document.querySelector('#next').onclick = () => { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); };
+    document.querySelector('#play').onclick = event => {
+      if (timer) { clearInterval(timer); timer = null; event.currentTarget.textContent = '▶'; return; }
+      event.currentTarget.textContent = 'Ⅱ'; timer = setInterval(() => { if (frameIndex >= frames.length - 1) { clearInterval(timer); timer = null; event.currentTarget.textContent = '▶'; return; } frameIndex++; renderFrame(); }, 700);
+    };
+    timeline.oninput = () => { frameIndex = Number(timeline.value); renderFrame(); };
+    window.addEventListener('keydown', event => { if (event.target.matches('input,select,button')) return; if (event.key === 'ArrowLeft') { frameIndex = Math.max(0, frameIndex - 1); renderFrame(); } if (event.key === 'ArrowRight') { frameIndex = Math.min(frames.length - 1, frameIndex + 1); renderFrame(); } });
+    window.addEventListener('resize', renderFrame);
+    await init();
+    tree = new BrowserTree(kind);
+    frames = [{label:'Ready', snapshot:snapshot(), affected_key:null}]; renderFrame();
+  </script>
+</body>
+</html>

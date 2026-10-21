@@ -1,12 +1,14 @@
+use serde::Serialize;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NodeMetadata {
     Avl { height: i32, balance: i32 },
     RedBlack { color: &'static str },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct NodeSnapshot<K, V> {
     pub key: K,
     pub value: V,
@@ -15,16 +17,18 @@ pub struct NodeSnapshot<K, V> {
     pub right: Option<Box<NodeSnapshot<K, V>>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TreeSnapshot<K, V> {
     pub root: Option<Box<NodeSnapshot<K, V>>>,
 }
 
+#[derive(Clone, Debug, Serialize)]
 pub struct TraceStep<K, V> {
     pub description: String,
     pub snapshot: TreeSnapshot<K, V>,
 }
 
+#[derive(Clone, Debug, Serialize)]
 pub struct Trace<K, V> {
     pub initial: TreeSnapshot<K, V>,
     pub steps: Vec<TraceStep<K, V>>,
@@ -59,65 +63,132 @@ impl<K: Display, V: Display> TreeSnapshot<K, V> {
         if levels.is_empty() {
             "(empty)".to_string()
         } else {
-            let label_width = levels
+            let node_width = levels
                 .iter()
                 .flatten()
-                .filter_map(|label| label.as_ref().map(String::len))
+                .filter_map(|label| {
+                    label
+                        .as_ref()
+                        .map(|label| label.split('\0').next().unwrap_or(label).len())
+                })
                 .max()
-                .unwrap_or(3)
-                + 2;
+                .unwrap_or(1)
+                .max(1);
+            let metadata_width = levels
+                .iter()
+                .flatten()
+                .filter_map(|label| {
+                    label
+                        .as_ref()?
+                        .split('\0')
+                        .nth(1)
+                        .map(metadata_lines)
+                        .map(|lines| lines.iter().map(String::len).max().unwrap_or(0))
+                })
+                .max()
+                .unwrap_or(0);
+            let metadata_padding = 3;
+            let slot_width = node_width + metadata_padding + metadata_width + 8;
             let mut lines = Vec::new();
             for depth in 0..levels.len() {
-                let slots = 1usize << depth;
-                let gap = label_width + 2;
-                let mut line = vec![' '; (slots * gap).max(label_width)];
+                let gap = slot_width;
+                let row_width = ((1usize << depth) * gap).max(slot_width);
+                let mut row_top = vec![' '; row_width];
+                let mut row_middle = vec![' '; row_width];
+                let mut row_bottom = vec![' '; row_width];
                 for (slot, label) in levels[depth].iter().enumerate() {
                     let Some(label) = label else { continue };
-                    let center = slot * gap + gap / 2;
-                    let start = center.saturating_sub(label.len() / 2);
-                    for (offset, character) in label.chars().enumerate() {
-                        if start + offset >= line.len() {
-                            line.resize(start + offset + 1, ' ');
+                    let cell_start = slot * gap;
+                    let node_offset = (gap - node_width) / 2;
+                    let key = label.split('\0').next().unwrap_or(label);
+                    let metadata = metadata_lines(label.split('\0').nth(1).unwrap_or(""));
+                    let rows = [
+                        format!(
+                            "{}{key:^node_width$}{}{}",
+                            " ".repeat(node_offset),
+                            " ".repeat(metadata_padding),
+                            metadata[0]
+                        ),
+                        format!(
+                            "{}{}{}",
+                            " ".repeat(node_offset + node_width),
+                            " ".repeat(metadata_padding),
+                            metadata[1]
+                        ),
+                        String::new(),
+                    ];
+                    for (row, text) in [&mut row_top, &mut row_middle, &mut row_bottom]
+                        .into_iter()
+                        .zip(rows)
+                    {
+                        if row.len() < cell_start + text.len() {
+                            row.resize(cell_start + text.len(), ' ');
                         }
-                        line[start + offset] = character;
+                        for (offset, character) in text.chars().enumerate() {
+                            row[cell_start + offset] = character;
+                        }
                     }
                 }
-                lines.push(line.into_iter().collect::<String>().trim_end().to_string());
+                lines.extend(
+                    [row_top, row_middle, row_bottom]
+                        .into_iter()
+                        .map(|row| row.into_iter().collect::<String>().trim_end().to_string()),
+                );
                 if depth + 1 < levels.len() {
-                    let child_gap = gap;
-                    let mut arrows =
-                        vec![' '; ((1usize << (depth + 1)) * child_gap).max(label_width)];
+                    let child_count = 1usize << (depth + 1);
+                    let mut connector_rows = vec![vec![' '; child_count * gap]; 3];
                     for (slot, parent) in levels[depth].iter().enumerate() {
                         if parent.is_none() {
                             continue;
                         }
                         let parent_center = slot * gap + gap / 2;
-                        let left = parent_center.saturating_sub(child_gap / 2);
-                        let right = parent_center + child_gap / 2;
-                        if slot * 2 < levels[depth + 1].len()
-                            && levels[depth + 1][slot * 2].is_some()
-                            && left < arrows.len()
-                        {
-                            arrows[left] = '/';
-                        }
-                        if slot * 2 + 1 < levels[depth + 1].len()
-                            && levels[depth + 1][slot * 2 + 1].is_some()
-                            && right < arrows.len()
-                        {
-                            arrows[right] = '\\';
+                        for child_slot in [slot * 2, slot * 2 + 1] {
+                            if levels[depth + 1]
+                                .get(child_slot)
+                                .is_none_or(Option::is_none)
+                            {
+                                continue;
+                            }
+                            let child_center = child_slot * gap + gap / 2;
+                            let direction = if child_center < parent_center {
+                                '/'
+                            } else {
+                                '\\'
+                            };
+                            for (row_index, row) in connector_rows.iter_mut().enumerate() {
+                                let numerator = row_index + 1;
+                                let delta = parent_center.abs_diff(child_center);
+                                let offset = delta * numerator / 4;
+                                let column = if child_center < parent_center {
+                                    parent_center - offset
+                                } else {
+                                    parent_center + offset
+                                };
+                                if column < row.len() {
+                                    row[column] = direction;
+                                }
+                            }
                         }
                     }
-                    lines.push(
-                        arrows
+                    lines.extend(
+                        connector_rows
                             .into_iter()
-                            .collect::<String>()
-                            .trim_end()
-                            .to_string(),
+                            .map(|row| row.into_iter().collect::<String>().trim_end().to_string()),
                     );
                 }
             }
             lines.join("\n")
         }
+    }
+}
+
+fn metadata_lines(metadata: &str) -> [String; 2] {
+    if let Some((height, balance)) = metadata.split_once(", ") {
+        [height.to_string(), balance.to_string()]
+    } else if let Some((label, value)) = metadata.split_once('=') {
+        [label.to_string(), value.to_string()]
+    } else {
+        [metadata.to_string(), String::new()]
     }
 }
 
@@ -137,7 +208,7 @@ fn collect_levels<K: Display, V: Display>(
     }
     let required = (1usize << depth).max(slot + 1);
     levels[depth].resize(required, None);
-    levels[depth][slot] = Some(format!("[{} {metadata}]", node.key));
+    levels[depth][slot] = Some(format!("{}\0{metadata}", node.key));
     collect_levels(&node.left, depth + 1, slot * 2, levels);
     collect_levels(&node.right, depth + 1, slot * 2 + 1, levels);
 }
