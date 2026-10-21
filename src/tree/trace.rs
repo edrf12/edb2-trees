@@ -67,9 +67,9 @@ fn render_node<K: Display, V: Display>(
     let connector = if prefix.is_empty() {
         ""
     } else if is_tail {
-        "└── "
+        "`-- "
     } else {
-        "├── "
+        "+-- "
     };
     let metadata = match node.metadata {
         NodeMetadata::Avl { height, balance } => format!("h={height}, bf={balance}"),
