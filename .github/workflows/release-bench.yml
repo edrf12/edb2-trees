@@ -1,4 +1,4 @@
-name: Release macOS Criterion benchmarks
+name: Release native Criterion benchmarks
 
 on:
   push:
@@ -10,18 +10,32 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.arch }} benchmark
+    name: Build ${{ matrix.os }} ${{ matrix.arch }} benchmark
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
+          - os: macos
+            runner: macos-latest
             target: aarch64-apple-darwin
             arch: arm64
-          - runner: macos-15-intel
+            extension: ''
+          - os: macos
+            runner: macos-15-intel
             target: x86_64-apple-darwin
             arch: x86_64
+            extension: ''
+          - os: linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            extension: ''
+          - os: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x86_64
+            extension: .exe
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,37 +45,37 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: cargo bench --target "$TARGET" --bench tree --no-run --message-format=json-render-diagnostics > bench-artifacts.json
+        shell: bash
       - name: Package executable
         env:
           TARGET: ${{ matrix.target }}
+          OS: ${{ matrix.os }}
           ARCH: ${{ matrix.arch }}
+          EXTENSION: ${{ matrix.extension }}
         run: |
-          BENCH_BIN="$(python3 - "$TARGET" <<'PY'
-          import json
-          import sys
-
-          target = sys.argv[1]
-          with open("bench-artifacts.json", encoding="utf-8") as artifacts:
-              for line in artifacts:
-                  message = json.loads(line)
-                  if message.get("reason") != "compiler-artifact":
-                      continue
-                  built = message.get("target", {})
-                  if built.get("name") == "tree" and "bench" in built.get("kind", []):
-                      executable = message.get("executable")
-                      if executable:
-                          print(executable)
-                          break
-              else:
-                  raise SystemExit(f"No benchmark executable found for {target}")
-          PY
+          BENCH_BIN="$(node - "$TARGET" <<'JS'
+          const fs = require("node:fs");
+          const target = process.argv[2];
+          for (const line of fs.readFileSync("bench-artifacts.json", "utf8").split(/\r?\n/)) {
+            if (!line) continue;
+            const message = JSON.parse(line);
+            if (message.reason === "compiler-artifact" && message.target?.name === "tree" && message.target.kind?.includes("bench") && message.executable) {
+              process.stdout.write(message.executable);
+              process.exit(0);
+            }
+          }
+          console.error(`No benchmark executable found for ${target}`);
+          process.exit(1);
+          JS
           )"
-          cp "$BENCH_BIN" "tree-bench-macos-$ARCH"
-          chmod +x "tree-bench-macos-$ARCH"
+          ASSET="tree-bench-$OS-$ARCH$EXTENSION"
+          cp "$BENCH_BIN" "$ASSET"
+          if [[ "$OS" != "windows" ]]; then chmod +x "$ASSET"; fi
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
-          name: bench-executable-${{ matrix.arch }}
-          path: tree-bench-macos-${{ matrix.arch }}
+          name: bench-executable-${{ matrix.os }}-${{ matrix.arch }}
+          path: tree-bench-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           if-no-files-found: error
 
   release:
@@ -75,5 +89,5 @@ jobs:
           path: release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/tree-bench-macos-*
+          files: release-assets/tree-bench-*
           fail_on_unmatched_files: true

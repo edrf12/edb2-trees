@@ -1,8 +1,6 @@
 # Árvores AVL e Rubro-Negras
 
-Implementações em Rust de árvores AVL e árvores rubro-negras inclinadas à
-esquerda (LLRB), com um visualizador local no navegador usando WebAssembly e
-benchmarks com Criterion.
+Implementações em Rust de árvores AVL e árvores rubro-negras, com um visualizador local no navegador usando WebAssembly e benchmarks com Criterion.
 
 [Read in English](README.md).
 
@@ -11,7 +9,7 @@ benchmarks com Criterion.
 - `src/tree/avl`: implementação da árvore AVL.
 - `src/tree/rbtree`: implementação da árvore rubro-negra inclinada à esquerda.
 - `src/wasm.rs`: interface WebAssembly usada pelo app no navegador.
-- `web/`: visualizador estático, sem framework JavaScript.
+- `web/`: visualizador estático usando o código wasm.
 - `benches/tree.rs`: benchmarks Criterion de inserção, remoção e busca.
 
 O visualizador aceita chaves inteiras, exibe metadados da árvore e permite
@@ -20,8 +18,8 @@ acompanhar buscas, rotações e mudanças de cor quadro a quadro. O estado da
 
 ## Requisitos
 
-- Rust estável e Cargo (edição 2024).
-- Para o app web: `wasm-pack`, Python 3 e o target Rust
+- Rust e Cargo.
+- Para o app web: `just`, `wasm-pack`, `miniserve` e o target Rust
   `wasm32-unknown-unknown`.
 
 ## Compilar e verificar
@@ -41,25 +39,29 @@ wasm-pack build --target web --out-dir web/pkg --no-pack
 
 ## Executar o app web localmente
 
-O script de desenvolvimento compila o pacote WASM e serve a página em
+Instale o `just` e o servidor de arquivos estáticos Rust:
+
+```sh
+cargo install --locked just
+cargo install --locked miniserve
+```
+O recipe `just dev-web` compila o pacote WASM e serve a página em
 <http://localhost:8000>:
 
 ```sh
-./scripts/dev-web.sh
+just dev-web
 ```
 
-O app não tem backend e não faz requisições de rede. Durante o desenvolvimento
-é necessário um servidor local porque os navegadores não carregam módulos
-WebAssembly a partir de páginas `file://`.
+## Visualizador web
 
-O GitHub Actions publica o site estático no GitHub Pages a cada push para
-`main`. Para usar um domínio próprio, configure-o em **Settings → Pages** do
-repositório e adicione os registros DNS indicados pelo GitHub Pages. Como o
-site é estático, ele também pode ser hospedado em outro serviço de hospedagem
-estática.
-
-Mais detalhes: [README web em português](web/README.pt-BR.md) ·
-[web README in English](web/README.md).
+O visualizador é um app web estático. As operações da árvore são executadas no
+módulo Rust compilado para WebAssembly; a página usa HTML, CSS e JavaScript
+puros para exibir os snapshots e as etapas das operações. Escolha AVL ou
+rubro-negra e insira, remova ou busque chaves inteiras. Pressione Enter no campo
+de chave para inserir. Use a linha do tempo, os botões de seta ou os atalhos de
+teclado para revisar os quadros. Se uma operação começar durante a reprodução,
+ela continua avançando pelos novos quadros. Os quadros de rotação e recoloração
+mostram snapshots alterados, sem repetir estados inalterados.
 
 ## Benchmarks Criterion
 
@@ -93,19 +95,5 @@ O Cargo exibe o caminho do executável, geralmente parecido com
 opções do Criterion depois dele:
 
 ```sh
-./target/release/deps/tree-<hash> --quick
-```
-
-## Benchmark para macOS
-
-Ao enviar uma tag de versão (`v*`), o workflow de release compila executáveis
-nativos para Apple Silicon e Intel e os anexa ao GitHub Release correspondente.
-Baixe o executável compatível com a arquitetura do Mac e rode-o com opções
-opcionais do Criterion, por exemplo `./tree-bench-macos-arm64 --quick`.
-
-Crie e envie uma tag de release assim:
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
+./target/release/deps/tree-<hash> --bench --quick
 ```
