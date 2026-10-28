@@ -78,15 +78,51 @@ jobs:
           path: tree-bench-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           if-no-files-found: error
 
-  release:
+  combine-macos:
+    name: Combine macOS benchmark architectures
     needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-executable-macos-arm64
+          path: arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-executable-macos-x86_64
+          path: x86_64
+      - name: Create universal executable
+        run: |
+          lipo -create \
+            arm64/tree-bench-macos-arm64 \
+            x86_64/tree-bench-macos-x86_64 \
+            -output tree-bench-macos-universal
+          chmod +x tree-bench-macos-universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-executable-macos-universal
+          path: tree-bench-macos-universal
+          if-no-files-found: error
+
+  release:
+    needs: [build, combine-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: bench-executable-*
-          merge-multiple: true
+          name: bench-executable-macos-universal
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-executable-linux-x86_64
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: bench-executable-windows-x86_64
+          path: release-assets
+      - name: Mark Unix release assets executable
+        run: |
+          find release-assets -type f ! -name '*.exe' -exec chmod +x {} +
       - uses: softprops/action-gh-release@v2
         with:
           files: release-assets/tree-bench-*
